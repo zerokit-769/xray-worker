@@ -5,10 +5,16 @@ mod proxy;
 use crate::config::Config;
 use crate::proxy::*;
 
+use std::collections::HashMap;
 use base64::{engine::general_purpose::URL_SAFE, Engine as _};
 use serde_json::json;
 use uuid::Uuid;
 use worker::*;
+use once_cell::sync::Lazy;
+use regex::Regex;
+
+static PROXYIP_PATTERN: Lazy<Regex> = Lazy::new(|| Regex::new(r"^.+-\d+$").unwrap());
+static PROXYKV_PATTERN: Lazy<Regex> = Lazy::new(|| Regex::new(r"^([A-Z]{2})").unwrap());
 
 #[event(fetch)]
 async fn main(req: Request, env: Env, _: Context) -> Result<Response> {
@@ -33,19 +39,45 @@ async fn main(req: Request, env: Env, _: Context) -> Result<Response> {
 }
 
 async fn tunnel(req: Request, mut cx: RouteContext<Config>) -> Result<Response> {
-    // Ambil parameter proxyip jika ada
-    let proxyip = cx.param("proxyip").unwrap_or("").to_string();
-    if !proxyip.is_empty() {
+    let mut proxyip = cx.param("proxyip").map(|s| s.to_string()).unwrap_or_default();
+
+    // Logika KV (sama seperti kode asli Anda)
+    if PROXYKV_PATTERN.is_match(&proxyip) {
+        let kvid_list: Vec<String> = proxyip.split(',').map(|s| s.to_string()).collect();
+        let kv = cx.kv("YUMI")?;
+        let mut proxy_kv_str = kv.get("proxy_kv").text().await?.unwrap_or_default();
+        let mut rand_buf = [0u8; 1];
+        getrandom::getrandom(&mut rand_buf).expect("failed generating random number");
+
+        if proxy_kv_str.is_empty() {
+            console_log!("getting proxy kv from github...");
+            let url = "https://raw.githubusercontent.com/datayumiwandi/shiroko/refs/heads/main/Data/Alive.json";
+            let req = Fetch::Url(Url::parse(url)?);
+            let mut res = req.send().await?;
+            if res.status_code() == 200 {
+                proxy_kv_str = res.text().await?;
+                kv.put("proxy_kv", &proxy_kv_str)?.expiration_ttl(60 * 60 * 12).execute().await?;
+            } else {
+                return Err(Error::from(format!("error getting proxy kv: {}", res.status_code())));
+            }
+        }
+
+        let proxy_kv: HashMap<String, Vec<String>> = serde_json::from_str(&proxy_kv_str)?;
+        let kv_index = (rand_buf[0] as usize) % kvid_list.len();
+        proxyip = kvid_list[kv_index].clone();
+        let proxyip_index = (rand_buf[0] as usize) % proxy_kv[&proxyip].len();
+        proxyip = proxy_kv[&proxyip][proxyip_index].clone().replace(':', "-");
+    }
+
+    let upgrade = req.headers().get("Upgrade")?.unwrap_or_default();
+    if upgrade == "websocket" && PROXYIP_PATTERN.is_match(&proxyip) {
         if let Some((addr, port_str)) = proxyip.split_once('-') {
             if let Ok(port) = port_str.parse() {
                 cx.data.proxy_addr = addr.to_string();
                 cx.data.proxy_port = port;
             }
         }
-    }
 
-    let upgrade = req.headers().get("Upgrade")?.unwrap_or_default();
-    if upgrade == "websocket" {
         let WebSocketPair { server, client } = WebSocketPair::new()?;
         server.accept()?;
 
