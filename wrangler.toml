@@ -2,6 +2,21 @@ name = "xray"
 main = "build/worker/shim.mjs"
 compatibility_date = "2024-05-23"
 minify = true
+[observability]
+
+enabled = false
+head_sampling_rate = 1
+
+[observability.logs]
+enabled = true
+head_sampling_rate = 1
+persist = true
+invocation_logs = true
+
+[observability.traces]
+enabled = false
+persist = true
+head_sampling_rate = 1
 
 
 account_id = "c94c08c1fa3eb249700c89571fc3a332"
