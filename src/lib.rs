@@ -16,9 +16,9 @@ use regex::Regex;
 static PROXYIP_PATTERN: Lazy<Regex> = Lazy::new(|| Regex::new(r"^.+-\d+$").unwrap());
 static PROXYKV_PATTERN: Lazy<Regex> = Lazy::new(|| Regex::new(r"^([A-Z]{2})").unwrap());
 
-//  Menggunakan #[event(main)] 
-#[event(main)]
-async fn main(req: Request, env: Env, _: Context) -> Result<Response> {
+
+#[event(fetch)]
+pub async fn main(req: Request, env: Env, _: Context) -> Result<Response> {
     let uuid = env
         .var("UUID")
         .map(|x| Uuid::parse_str(&x.to_string()).unwrap_or_default())?;
